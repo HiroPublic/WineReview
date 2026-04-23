@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+DerivedData/
+*.xcuserdata/
+xcuserdata/
+*.xcuserdatad/
+*.xcuserstate
+.DS_Store
+build/
+*.ipa

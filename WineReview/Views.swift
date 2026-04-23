@@ -1,0 +1,810 @@
+import SwiftUI
+
+struct RootView: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        NavigationStack(path: $store.path) {
+            LaunchView()
+                .navigationDestination(for: AppRoute.self) { route in
+                    switch route {
+                    case .inventory:
+                        InventoryWineListView()
+                    case .wineDetail(let wineId):
+                        WineDetailView(wineId: wineId)
+                    case .ratingInput(let wineId):
+                        RatingInputView(wineId: wineId)
+                    case .initialPrompt(let sessionId):
+                        InitialPromptEditorView(sessionId: sessionId)
+                    case .aiReview(let sessionId):
+                        AIReviewView(sessionId: sessionId)
+                    case .finalConfirmation(let sessionId):
+                        FinalConfirmationView(sessionId: sessionId)
+                    case .saveComplete(let wineId):
+                        SaveCompleteView(wineId: wineId)
+                    case .settings:
+                        SettingsView()
+                    }
+                }
+        }
+        .alert("通知", isPresented: messageBinding) {
+            Button("OK") { store.resetMessage() }
+        } message: {
+            Text(store.message ?? "")
+        }
+    }
+
+    private var messageBinding: Binding<Bool> {
+        Binding(
+            get: { store.message != nil },
+            set: { if !$0 { store.resetMessage() } }
+        )
+    }
+}
+
+struct LaunchView: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Spacer()
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Wine Review")
+                    .font(.largeTitle.bold())
+                Text("Notionの在庫ワインから選び、AIとレビュー文を整えて保存します。")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 12) {
+                StatusRow(title: "Notion連携", isReady: store.config.hasNotionConfig)
+                StatusRow(title: "\(store.config.aiProvider.label)設定", isReady: store.config.hasSelectedAIConfig)
+            }
+
+            if store.isLoading {
+                ProgressView("同期中")
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            Button {
+                if store.config.missingConfigMessage == nil {
+                    store.path.append(.inventory)
+                } else {
+                    store.path.append(.settings)
+                }
+            } label: {
+                Label(store.config.missingConfigMessage == nil ? "在庫一覧へ" : "初期設定へ", systemImage: "wineglass")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button {
+                store.path.append(.settings)
+            } label: {
+                Label("設定を開く", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            Spacer()
+        }
+        .padding()
+        .readableContent()
+        .navigationTitle("起動")
+    }
+}
+
+struct StatusRow: View {
+    let title: String
+    let isReady: Bool
+
+    var body: some View {
+        HStack {
+            Image(systemName: isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(isReady ? .green : .orange)
+            Text(title)
+            Spacer()
+            Text(isReady ? "設定済み" : "未設定")
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct InventoryWineListView: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var searchText = ""
+    @State private var sortMode = SortMode.purchaseDate
+
+    enum SortMode: String, CaseIterable, Identifiable {
+        case purchaseDate = "購入日"
+        case name = "名前"
+        case price = "価格"
+
+        var id: String { rawValue }
+    }
+
+    var filteredWines: [Wine] {
+        let base = searchText.isEmpty ? store.wines : store.wines.filter {
+            [$0.name, $0.type, $0.country, $0.region, $0.detail, $0.detailAccented].compactMap { $0 }.joined(separator: " ").localizedCaseInsensitiveContains(searchText)
+        }
+        switch sortMode {
+        case .purchaseDate:
+            return base.sorted { ($0.purchaseDate ?? .distantPast) > ($1.purchaseDate ?? .distantPast) }
+        case .name:
+            return base.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .price:
+            return base.sorted { ($0.price ?? 0) > ($1.price ?? 0) }
+        }
+    }
+
+    private var usesGridLayout: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    var body: some View {
+        Group {
+            if store.isLoading && store.wines.isEmpty {
+                ProgressView("在庫ワインを取得中")
+            } else if filteredWines.isEmpty {
+                ContentUnavailableView("在庫ありのワインがありません", systemImage: "wineglass", description: Text("再読み込みするか、設定を確認してください。"))
+            } else {
+                ScrollView {
+                    if usesGridLayout {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 520), spacing: 16)], spacing: 16) {
+                            ForEach(filteredWines) { wine in
+                                NavigationLink(value: AppRoute.wineDetail(wine.id)) {
+                                    WineCardView(wine: wine)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(20)
+                    } else {
+                        LazyVStack(spacing: 0) {
+                            ForEach(filteredWines) { wine in
+                                NavigationLink(value: AppRoute.wineDetail(wine.id)) {
+                                    WineRowView(wine: wine)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                Divider()
+                                    .padding(.leading, 16)
+                            }
+                        }
+                        .background(.background)
+                    }
+                }
+                .refreshable {
+                    await store.loadInventory(forceRefresh: true)
+                }
+            }
+        }
+        .searchable(text: $searchText, prompt: "ワイン名、国、品種で検索")
+        .navigationTitle("在庫ワイン")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("在庫ワイン")
+                        .font(.headline)
+                    Text("\(store.wines.count) / \(store.totalWineCount)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    Picker("並び替え", selection: $sortMode) {
+                        ForEach(SortMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await store.loadInventory(forceRefresh: true) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(store.isLoading)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    store.path.append(.settings)
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+            }
+        }
+        .task {
+            if store.wines.isEmpty {
+                await store.loadInventory(forceRefresh: false)
+            }
+        }
+    }
+}
+
+struct WineCardView: View {
+    let wine: Wine
+
+    var body: some View {
+        WineRowView(wine: wine)
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 136, alignment: .topLeading)
+            .background(.background)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(.quaternary)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct WineRowView: View {
+    let wine: Wine
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(wine.name)
+                    .font(.headline)
+                Spacer()
+                if let rating = wine.rating {
+                    Text(rating)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(wine.shortSummary.isEmpty ? "詳細情報なし" : wine.shortSummary)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            if let detail = wine.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            } else if let detail = wine.detailAccented, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct WineDetailView: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.openURL) private var openURL
+    let wineId: String
+
+    var wine: Wine? { store.wine(id: wineId) }
+
+    var body: some View {
+        Group {
+            if let wine {
+                List {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(wine.name)
+                                .font(.title2.bold())
+                            Text(wine.shortSummary)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Section("プロパティ") {
+                        DetailRow("Type", wine.type)
+                        DetailRow("Country", wine.country)
+                        DetailRow("Region", wine.region)
+                        DetailRow("Cave", wine.cave)
+                        DetailRow("Cepage", wine.cepage.joined(separator: ", "))
+                        DetailRow("Rating", wine.rating)
+                        DetailRow("Price", wine.price.map { "¥\($0)" })
+                        DetailRow("tasting date", wine.tastingDate.map(dateText))
+                        DetailRow("Purchase date", wine.purchaseDate.map(dateText))
+                        DetailRow("Stock", wine.stock ? "在庫あり" : "在庫なし")
+                    }
+                    Section("Détail") {
+                        Text(wine.detailAccented ?? "Détailは未設定です。")
+                            .foregroundStyle(wine.detailAccented == nil ? .secondary : .primary)
+                    }
+                    Section("Comments") {
+                        if wine.comments.isEmpty {
+                            Text("Commentsはありません。")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(wine.comments.enumerated()), id: \.offset) { _, comment in
+                                Text(comment)
+                            }
+                        }
+                    }
+                    Section {
+                        Button {
+                            if let url = wine.notionUrl {
+                                openURL(url)
+                            } else {
+                                store.message = "Notion URLが取得できません。"
+                            }
+                        } label: {
+                            Label("Notionで開く", systemImage: "arrow.up.right.square")
+                        }
+                    }
+                }
+            } else {
+                ContentUnavailableView("ワインが見つかりません", systemImage: "questionmark.circle")
+            }
+        }
+        .navigationTitle("ワイン詳細")
+        .task(id: wineId) {
+            await store.reloadWine(pageId: wineId)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if let wine {
+                    Button {
+                        startReview(for: wine)
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await store.reloadWine(pageId: wineId) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let wine {
+                Button {
+                    startReview(for: wine)
+                } label: {
+                    Label("レビューを作成", systemImage: "square.and.pencil")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding()
+                .background(.bar)
+            }
+        }
+    }
+
+    private func startReview(for wine: Wine) {
+        _ = store.createSession(for: wine)
+        store.path.append(.ratingInput(wine.id))
+    }
+}
+
+struct RatingInputView: View {
+    @EnvironmentObject private var store: AppStore
+    let wineId: String
+    @State private var sessionId: UUID?
+    @State private var rating = "★★★"
+    @State private var ratingNote = ""
+    @State private var tastingDate = Date()
+    @State private var markOutOfStock = true
+
+    private let ratingOptions = ["★", "★★", "★★★", "★★★★", "★★★★★"]
+
+    var body: some View {
+        Form {
+            if let wine = store.wine(id: wineId) {
+                Section("対象ワイン") {
+                    Text(wine.name)
+                    DetailRow("現在のRating", wine.rating)
+                }
+            }
+            Section("評価") {
+                Picker("Rating", selection: $rating) {
+                    ForEach(ratingOptions, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("評価補足", text: $ratingNote, axis: .vertical)
+                    .lineLimit(2...4)
+                DatePicker("試飲日", selection: $tastingDate, displayedComponents: .date)
+                Toggle("保存時にStockを在庫なしへ変更", isOn: $markOutOfStock)
+            }
+            Section {
+                Button {
+                    guard let wine = store.wine(id: wineId) else { return }
+                    let id = sessionId ?? store.createSession(for: wine)
+                    var session = store.session(id: id) ?? ReviewSession(id: id, wineId: wine.id, rating: rating, ratingNote: "", tastingDate: Date(), markOutOfStock: true, initialGenerationText: store.settings.template1, candidateComments: [], finalGenerationText: store.settings.template2, drafts: [], finalComment: "")
+                    session.rating = rating
+                    session.ratingNote = ratingNote
+                    session.tastingDate = tastingDate
+                    session.markOutOfStock = markOutOfStock
+                    store.updateSession(session)
+                    store.path.append(.initialPrompt(id))
+                } label: {
+                    Label("次へ", systemImage: "chevron.right")
+                }
+            }
+        }
+        .navigationTitle("評価入力")
+        .onAppear {
+            if let existing = store.sessions.values.first(where: { $0.wineId == wineId }) {
+                sessionId = existing.id
+                rating = existing.rating
+                ratingNote = existing.ratingNote
+                tastingDate = existing.tastingDate
+                markOutOfStock = existing.markOutOfStock
+            } else if let wine = store.wine(id: wineId) {
+                rating = wine.rating ?? "★★★"
+            }
+        }
+    }
+}
+
+struct InitialPromptEditorView: View {
+    @EnvironmentObject private var store: AppStore
+    let sessionId: UUID
+    @State private var text = ""
+
+    var body: some View {
+        Form {
+            if let session = store.session(id: sessionId), let wine = store.wine(id: session.wineId) {
+                Section("ワイン概要") {
+                    Text(wine.name)
+                    Text(wine.shortSummary)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("初回生成テキスト") {
+                TextEditor(text: $text)
+                    .frame(minHeight: 220)
+                Text("\(text.count)文字")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Button {
+                    saveText()
+                    store.path.append(.aiReview(sessionId))
+                    Task { await store.generateCandidates(sessionId: sessionId) }
+                } label: {
+                    if store.isGenerating {
+                        ProgressView()
+                    } else {
+                        Label("AIでレビュー案を作成", systemImage: "sparkles")
+                    }
+                }
+                .disabled(store.isGenerating || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .navigationTitle("初回テキスト")
+        .onAppear {
+            text = store.session(id: sessionId)?.initialGenerationText ?? store.settings.template1
+        }
+        .onDisappear {
+            saveText()
+        }
+    }
+
+    private func saveText() {
+        guard var session = store.session(id: sessionId) else { return }
+        session.initialGenerationText = text
+        store.updateSession(session)
+    }
+}
+
+struct AIReviewView: View {
+    @EnvironmentObject private var store: AppStore
+    let sessionId: UUID
+    @State private var selectedCandidates: Set<Int> = []
+    @State private var feedback = ""
+    @State private var finalComment = ""
+
+    var body: some View {
+        Form {
+            if let session = store.session(id: sessionId) {
+                Section("5つの説明候補") {
+                    if store.isGenerating && session.candidateComments.isEmpty {
+                        ProgressView("候補を生成中")
+                    }
+                    ForEach(Array(session.candidateComments.enumerated()), id: \.offset) { index, candidate in
+                        Button {
+                            if selectedCandidates.contains(index) {
+                                selectedCandidates.remove(index)
+                            } else {
+                                selectedCandidates.insert(index)
+                            }
+                        } label: {
+                            HStack(alignment: .top) {
+                                Image(systemName: selectedCandidates.contains(index) ? "checkmark.circle.fill" : "circle")
+                                Text(candidate)
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                    }
+                    Button {
+                        Task { await store.generateCandidates(sessionId: sessionId) }
+                    } label: {
+                        Label("5候補を再生成", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(store.isGenerating)
+                }
+
+                Section("再生成用テキスト") {
+                    HStack {
+                        Button("短く") { feedback += "\nもっと短く。" }
+                        Button("詳しく") { feedback += "\n具体的な要素を少し追加。" }
+                        Button("自然に") { feedback += "\nより自然な言い回しに。" }
+                    }
+                    TextEditor(text: $feedback)
+                        .frame(minHeight: 140)
+                    Button {
+                        saveFeedbackAndFinal()
+                        Task { await store.generateFinalReview(sessionId: sessionId, selectedCandidateIndexes: selectedCandidates) }
+                    } label: {
+                        if store.isGenerating {
+                            ProgressView()
+                        } else {
+                            Label("選択してまとめる", systemImage: "text.bubble")
+                        }
+                    }
+                    .disabled(store.isGenerating || session.candidateComments.isEmpty)
+                }
+
+                Section("現在のレビューコメント案") {
+                    TextEditor(text: $finalComment)
+                        .frame(minHeight: 160)
+                    Text("\(finalComment.count)文字")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("生成履歴") {
+                    ForEach(session.drafts) { draft in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(draft.provider.label) / \(draft.model)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(draft.text)
+                                .lineLimit(3)
+                        }
+                    }
+                }
+
+                Section {
+                    Button {
+                        saveFeedbackAndFinal()
+                        store.path.append(.finalConfirmation(sessionId))
+                    } label: {
+                        Label("これで確定", systemImage: "checkmark")
+                    }
+                    .disabled(finalComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            } else {
+                ContentUnavailableView("レビューセッションがありません", systemImage: "questionmark.circle")
+            }
+        }
+        .navigationTitle("AIレビュー作成")
+        .onAppear {
+            store.refreshFinalPromptIfDefault(sessionId: sessionId)
+            if let session = store.session(id: sessionId) {
+                feedback = session.finalGenerationText
+                finalComment = session.finalComment
+            }
+        }
+        .onChange(of: store.session(id: sessionId)?.finalComment ?? "") { _, newValue in
+            finalComment = newValue
+        }
+        .onDisappear {
+            saveFeedbackAndFinal()
+        }
+    }
+
+    private func saveFeedbackAndFinal() {
+        guard var session = store.session(id: sessionId) else { return }
+        session.finalGenerationText = feedback
+        session.finalComment = finalComment
+        store.updateSession(session)
+    }
+}
+
+struct FinalConfirmationView: View {
+    @EnvironmentObject private var store: AppStore
+    let sessionId: UUID
+
+    var body: some View {
+        Form {
+            if let session = store.session(id: sessionId), let wine = store.wine(id: session.wineId) {
+                Section("保存内容") {
+                    Text(wine.name)
+                    DetailRow("Rating", session.rating)
+                    DetailRow("Stock", session.markOutOfStock ? "falseへ更新" : "変更しない")
+                    DetailRow("tasting date", dateText(session.tastingDate))
+                }
+                Section("最終コメント") {
+                    Text(session.finalComment)
+                }
+                if let result = store.lastSaveResult, !result.succeeded {
+                    Section("保存エラー") {
+                        ForEach(result.failures) { failure in
+                            Text("\(failure.operation): \(failure.message)")
+                        }
+                    }
+                }
+                Section {
+                    Button {
+                        Task { await store.saveReview(sessionId: sessionId) }
+                    } label: {
+                        if store.isSaving {
+                            ProgressView()
+                        } else {
+                            Label("Notionへ保存", systemImage: "square.and.arrow.down")
+                        }
+                    }
+                    .disabled(store.isSaving)
+                }
+            } else {
+                ContentUnavailableView("保存対象がありません", systemImage: "questionmark.circle")
+            }
+        }
+        .navigationTitle("最終確認")
+    }
+}
+
+struct SaveCompleteView: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.openURL) private var openURL
+    let wineId: String
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(.green)
+            Text("保存が完了しました")
+                .font(.title2.bold())
+            if let session = store.sessions.values.first(where: { $0.wineId == wineId }) {
+                Text(session.finalComment)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+            }
+            Button {
+                if let url = store.wine(id: wineId)?.notionUrl {
+                    openURL(url)
+                }
+            } label: {
+                Label("Notionで開く", systemImage: "arrow.up.right.square")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            Button {
+                store.path = [.inventory]
+                Task { await store.loadInventory(forceRefresh: true) }
+            } label: {
+                Label("在庫一覧へ戻る", systemImage: "list.bullet")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .readableContent(maxWidth: 640)
+        .navigationTitle("保存完了")
+        .navigationBarBackButtonHidden()
+    }
+}
+
+struct SettingsView: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        Form {
+            Section("Notion") {
+                SecureField("Notion API Key", text: $store.settings.notionApiKey)
+                TextField("Wine Tracker Database ID", text: $store.settings.notionDatabaseId)
+                    .textInputAutocapitalization(.never)
+            }
+            Section("生成AI") {
+                Picker("Provider", selection: $store.settings.aiProvider) {
+                    ForEach(AIProvider.allCases) { provider in
+                        Text(provider.label).tag(provider)
+                    }
+                }
+                SecureField("OpenAI API Key", text: $store.settings.openAIAPIKey)
+                TextField("OpenAI Model", text: $store.settings.openAIModel)
+                    .textInputAutocapitalization(.never)
+                SecureField("Gemini API Key", text: $store.settings.geminiAPIKey)
+                TextField("Gemini Model", text: $store.settings.geminiModel)
+                    .textInputAutocapitalization(.never)
+            }
+            Section("プロパティマッピング") {
+                TextField("Title", text: $store.settings.propertyMapping.title)
+                TextField("Stock", text: $store.settings.propertyMapping.stock)
+                TextField("Rating", text: $store.settings.propertyMapping.rating)
+                TextField("Type", text: $store.settings.propertyMapping.type)
+                TextField("Country", text: $store.settings.propertyMapping.country)
+                TextField("Region", text: $store.settings.propertyMapping.region)
+                TextField("Cave", text: $store.settings.propertyMapping.cave)
+                TextField("Cepage", text: $store.settings.propertyMapping.cepage)
+                TextField("Price", text: $store.settings.propertyMapping.price)
+                TextField("Detail", text: $store.settings.propertyMapping.detail)
+                TextField("tasting date", text: $store.settings.propertyMapping.tastingDate)
+                TextField("Purchase date", text: $store.settings.propertyMapping.purchaseDate)
+            }
+            Section("定型文") {
+                Text("定型テキスト1")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $store.settings.template1)
+                    .frame(minHeight: 110)
+                Text("定型テキスト2")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $store.settings.template2)
+                    .frame(minHeight: 90)
+                Stepper("再生成上限: \(store.settings.maxRegenerationCount)", value: $store.settings.maxRegenerationCount, in: 1...30)
+            }
+            Section {
+                Button {
+                    store.saveSettings()
+                    Task { await store.loadInventory(forceRefresh: true) }
+                } label: {
+                    Label("保存して接続", systemImage: "checkmark.circle")
+                }
+            }
+        }
+        .navigationTitle("設定")
+    }
+}
+
+struct DetailRow: View {
+    let title: String
+    let value: String?
+
+    init(_ title: String, _ value: String?) {
+        self.title = title
+        self.value = value
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value?.isEmpty == false ? value! : "未設定")
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+func dateText(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "ja_JP")
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    return formatter.string(from: date)
+}
+
+private struct ReadableContentModifier: ViewModifier {
+    let maxWidth: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: maxWidth)
+            .frame(maxWidth: .infinity)
+    }
+}
+
+private extension View {
+    func readableContent(maxWidth: CGFloat = 720) -> some View {
+        modifier(ReadableContentModifier(maxWidth: maxWidth))
+    }
+}
