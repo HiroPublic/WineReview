@@ -80,6 +80,7 @@ final class AppStore: ObservableObject {
             tastingDate: Date(),
             markOutOfStock: true,
             initialGenerationText: settings.template1,
+            tastingInput: nil,
             candidateComments: [],
             finalGenerationText: settings.template2,
             drafts: [],
@@ -119,7 +120,8 @@ final class AppStore: ObservableObject {
                 wine: wine,
                 rating: session.rating,
                 ratingNote: session.ratingNote,
-                initialGenerationText: session.initialGenerationText
+                initialGenerationText: session.initialGenerationText,
+                tastingInput: session.tastingInput
             )
             let candidates = try await AIReviewRepository(config: config).generateCandidates(input: input)
             session.candidateComments = candidates
@@ -161,7 +163,8 @@ final class AppStore: ObservableObject {
                 wine: wine,
                 rating: session.rating,
                 candidateComments: candidates,
-                finalGenerationText: session.finalGenerationText
+                finalGenerationText: session.finalGenerationText,
+                tastingInput: session.tastingInput
             )
             let final = try await AIReviewRepository(config: config).generateFinalReview(input: input)
             session.finalComment = final

@@ -200,7 +200,8 @@ struct GeminiClient {
 
 struct ReviewPromptBuilder {
     func candidatePrompt(input: ReviewGenerationInput) -> String {
-        """
+        let tastingSection = tastingSummary(input.tastingInput)
+        return """
         ワイン情報:
         \(wineSummary(input.wine))
 
@@ -208,12 +209,15 @@ struct ReviewPromptBuilder {
         - Rating: \(input.rating)
         - 評価補足: \(input.ratingNote)
 
+        \(tastingSection)
+
         初回生成用テキスト:
         \(input.initialGenerationText)
 
         出力条件:
         - 日本語で、番号付きリストの5項目だけを出力してください。
         - ワイン中級者が販売店ソムリエに評価を伝える場面に合う表現にしてください。
+        - ユーザーのテースティング入力を優先して表現に反映してください。
         - 不明な生産者名、品種、産地、味わいは補完しないでください。
         """
     }
@@ -222,11 +226,15 @@ struct ReviewPromptBuilder {
         let candidates = input.candidateComments.enumerated().map { index, text in
             "\(index + 1). \(text)"
         }.joined(separator: "\n")
+        let tastingSection = tastingSummary(input.tastingInput)
+        let lengthGuidance = reviewLengthGuidance(from: input.finalGenerationText)
         return """
         ワイン情報:
         \(wineSummary(input.wine))
 
         Rating: \(input.rating)
+
+        \(tastingSection)
 
         初回生成された5つの説明候補:
         \(candidates)
@@ -237,7 +245,7 @@ struct ReviewPromptBuilder {
         出力条件:
         - Notionにそのまま保存できる日本語レビューを1段落で出力してください。
         - ワイン名やタイトルを先頭に付けず、レビュー本文だけを出力してください。
-        - 160文字程度にしてください。
+        \(lengthGuidance)
         - Markdown見出しや箇条書きは使わないでください。
         - 不明な情報は断定しないでください。
         """
@@ -263,6 +271,58 @@ struct ReviewPromptBuilder {
         - 価格: \(wine.price.map { "¥\($0)" } ?? "未設定")
         - 既存メモ/Comments: \(existingMemo.isEmpty ? "未設定" : existingMemo)
         """
+    }
+
+    private func tastingSummary(_ tastingInput: TastingInput?) -> String {
+        guard let tastingInput else {
+            return "ユーザーのテースティング入力:\n- 未入力"
+        }
+
+        let profile = TastingProfile.resolve(from: tastingInput.wineType)
+        let sliderLines = profile.sliderLabels
+            .compactMap { label -> String? in
+                guard let value = tastingInput.sliders[label] else { return nil }
+                return "  - \(label): \(value)"
+            }
+            .joined(separator: "\n")
+
+        let impressionTags = tastingInput.impressionTags.isEmpty ? "未入力" : tastingInput.impressionTags.joined(separator: "、")
+        let foodPairingTags = tastingInput.foodPairingTags.isEmpty ? "未入力" : tastingInput.foodPairingTags.joined(separator: "、")
+        let freeNote = tastingInput.freeNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未入力" : tastingInput.freeNote
+
+        return """
+        ユーザーのテースティング入力:
+        - ワインタイプ: \(tastingInput.wineType)
+        - スライダー評価:
+        \(sliderLines)
+        - 印象タグ:
+          \(impressionTags)
+        - 料理相性:
+          \(foodPairingTags)
+        - 自由メモ:
+          \(freeNote)
+        """
+    }
+
+    private func reviewLengthGuidance(from text: String) -> String {
+        let patterns = [
+            #"(?:約|およそ)?\s*(\d{2,4})\s*文字"#,
+            #"(?:約|およそ)?\s*(\d{2,4})\s*字"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            guard let match = regex.firstMatch(in: text, range: range),
+                  let numberRange = Range(match.range(at: 1), in: text) else {
+                continue
+            }
+
+            let number = String(text[numberRange])
+            return "- 文字数は\(number)文字前後を目安にしてください。再生成用テキストの文字数指定を優先してください。"
+        }
+
+        return "- 再生成用テキストに文字数指定がある場合はその指示を優先してください。指定がない場合は160文字程度にしてください。"
     }
 }
 

@@ -2,7 +2,9 @@ import Foundation
 
 struct EnvLoader {
     func load() -> [String: String] {
-        load(from: .main)
+        var values = load(from: .main)
+        values.merge(loadLocalDevelopmentEnv()) { _, new in new }
+        return values
     }
 
     func load(from bundle: Bundle) -> [String: String] {
@@ -52,6 +54,22 @@ struct EnvLoader {
             .replacingOccurrences(of: "\\r", with: "\r")
             .replacingOccurrences(of: "\\t", with: "\t")
             .replacingOccurrences(of: "\\\"", with: "\"")
+    }
+
+    private func loadLocalDevelopmentEnv() -> [String: String] {
+#if DEBUG
+        let configFileURL = URL(fileURLWithPath: #filePath)
+        let workspaceRootURL = configFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let envURL = workspaceRootURL.appendingPathComponent(".env")
+        guard let text = try? String(contentsOf: envURL, encoding: .utf8) else {
+            return [:]
+        }
+        return parse(text)
+#else
+        return [:]
+#endif
     }
 }
 

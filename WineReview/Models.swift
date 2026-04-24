@@ -123,10 +123,70 @@ struct ReviewSession: Identifiable, Codable, Equatable {
     var tastingDate: Date
     var markOutOfStock: Bool
     var initialGenerationText: String
+    var tastingInput: TastingInput?
     var candidateComments: [String]
     var finalGenerationText: String
     var drafts: [ReviewDraft]
     var finalComment: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case wineId
+        case rating
+        case ratingNote
+        case tastingDate
+        case markOutOfStock
+        case initialGenerationText
+        case tastingInput
+        case candidateComments
+        case finalGenerationText
+        case drafts
+        case finalComment
+    }
+
+    init(
+        id: UUID,
+        wineId: String,
+        rating: String,
+        ratingNote: String,
+        tastingDate: Date,
+        markOutOfStock: Bool,
+        initialGenerationText: String,
+        tastingInput: TastingInput? = nil,
+        candidateComments: [String],
+        finalGenerationText: String,
+        drafts: [ReviewDraft],
+        finalComment: String
+    ) {
+        self.id = id
+        self.wineId = wineId
+        self.rating = rating
+        self.ratingNote = ratingNote
+        self.tastingDate = tastingDate
+        self.markOutOfStock = markOutOfStock
+        self.initialGenerationText = initialGenerationText
+        self.tastingInput = tastingInput
+        self.candidateComments = candidateComments
+        self.finalGenerationText = finalGenerationText
+        self.drafts = drafts
+        self.finalComment = finalComment
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        wineId = try container.decode(String.self, forKey: .wineId)
+        rating = try container.decode(String.self, forKey: .rating)
+        ratingNote = try container.decodeIfPresent(String.self, forKey: .ratingNote) ?? ""
+        tastingDate = try container.decodeIfPresent(Date.self, forKey: .tastingDate) ?? Date()
+        markOutOfStock = try container.decodeIfPresent(Bool.self, forKey: .markOutOfStock) ?? true
+        initialGenerationText = try container.decodeIfPresent(String.self, forKey: .initialGenerationText) ?? ""
+        tastingInput = try container.decodeIfPresent(TastingInput.self, forKey: .tastingInput)
+        candidateComments = try container.decodeIfPresent([String].self, forKey: .candidateComments) ?? []
+        finalGenerationText = try container.decodeIfPresent(String.self, forKey: .finalGenerationText) ?? ""
+        drafts = try container.decodeIfPresent([ReviewDraft].self, forKey: .drafts) ?? []
+        finalComment = try container.decodeIfPresent(String.self, forKey: .finalComment) ?? ""
+    }
 }
 
 struct ReviewDraft: Identifiable, Codable, Equatable {
@@ -144,6 +204,62 @@ struct ReviewGenerationInput {
     let rating: String
     let ratingNote: String
     let initialGenerationText: String
+    let tastingInput: TastingInput?
+}
+
+struct TastingInput: Codable, Equatable {
+    let wineType: String
+    let sliders: [String: Int]
+    let impressionTags: [String]
+    let foodPairingTags: [String]
+    let freeNote: String
+}
+
+struct TastingProfile: Equatable {
+    let wineType: String
+    let sliderLabels: [String]
+    let impressionTags: [String]
+
+    static let foodPairingTags = ["和食", "魚料理", "鶏肉", "豚肉", "牛肉", "チーズ", "前菜", "パスタ"]
+
+    static func resolve(from wineType: String?) -> TastingProfile {
+        let raw = (wineType ?? "").lowercased()
+
+        if raw.contains("sparkling") || raw.contains("champagne") || raw.contains("cava") || raw.contains("cremant") || raw.contains("mousseux") || raw.contains("泡") || raw.contains("スパークリング") {
+            return sparkling
+        }
+        if raw.contains("rose") || raw.contains("rosé") || raw.contains("ロゼ") {
+            return rose
+        }
+        if raw.contains("red") || raw.contains("rouge") || raw.contains("赤") {
+            return red
+        }
+        return white
+    }
+
+    static let white = TastingProfile(
+        wineType: "白ワイン",
+        sliderLabels: ["すっきり感", "酸味", "果実味", "香り", "コク", "ミネラル感", "後味"],
+        impressionTags: ["柑橘", "青リンゴ", "洋梨", "ミネラル", "すっきり", "まろやか", "上品", "爽やか"]
+    )
+
+    static let red = TastingProfile(
+        wineType: "赤ワイン",
+        sliderLabels: ["重み", "タンニン", "果実味", "酸味", "なめらかさ", "樽・スパイス感", "後味"],
+        impressionTags: ["赤い果実", "黒い果実", "スパイス", "樽の香り", "しっかり", "なめらか", "力強い", "コクがある"]
+    )
+
+    static let rose = TastingProfile(
+        wineType: "ロゼワイン",
+        sliderLabels: ["すっきり感", "果実味", "酸味", "華やかさ", "軽やかさ", "コク", "後味"],
+        impressionTags: ["いちご", "赤い果実", "花の香り", "すっきり", "華やか", "軽やか", "飲みやすい", "上品"]
+    )
+
+    static let sparkling = TastingProfile(
+        wineType: "スパークリング",
+        sliderLabels: ["泡の細かさ", "泡の強さ", "すっきり感", "酸味", "果実味", "コク", "後味"],
+        impressionTags: ["きめ細かい泡", "爽快", "柑橘", "青リンゴ", "すっきり", "クリーミー", "上品", "乾杯向き"]
+    )
 }
 
 struct FinalReviewGenerationInput {
@@ -151,6 +267,7 @@ struct FinalReviewGenerationInput {
     let rating: String
     let candidateComments: [String]
     let finalGenerationText: String
+    let tastingInput: TastingInput?
 }
 
 struct SaveResult: Equatable {

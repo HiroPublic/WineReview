@@ -114,6 +114,7 @@
 			buildPhases = (
 				100000000000000000000070 /* Sources */,
 				100000000000000000000020 /* Frameworks */,
+				100000000000000000000081 /* Sync AppDefaults.env */,
 				100000000000000000000080 /* Resources */,
 			);
 			buildRules = (
@@ -202,6 +203,30 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		100000000000000000000081 /* Sync AppDefaults.env */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(PROJECT_DIR)/.env",
+				"$(PROJECT_DIR)/scripts/sync_appdefaults_from_env.py",
+			);
+			name = "Sync AppDefaults.env";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ -f \"${PROJECT_DIR}/.env\" ]; then\n  /usr/bin/python3 \"${PROJECT_DIR}/scripts/sync_appdefaults_from_env.py\" \"${PROJECT_DIR}/.env\" \"${PROJECT_DIR}/WineReview/AppDefaults.env\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		100000000000000000000070 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -245,6 +270,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 29R89C7X3V;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Wine Review";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.food-and-drink";
@@ -279,6 +305,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 29R89C7X3V;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Wine Review";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.food-and-drink";

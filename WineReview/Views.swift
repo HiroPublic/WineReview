@@ -451,28 +451,116 @@ struct RatingInputView: View {
 
 struct InitialPromptEditorView: View {
     @EnvironmentObject private var store: AppStore
+    @Environment(\.openURL) private var openURL
     let sessionId: UUID
-    @State private var text = ""
+    @State private var promptText = ""
+    @State private var sliderValues: [String: Int] = [:]
+    @State private var selectedImpressionTags: [String] = []
+    @State private var selectedFoodPairingTags: [String] = []
+    @State private var freeNote = ""
+    @State private var isFoodSectionExpanded = false
+
+    private let sliderRange = 1...5
+    private let maxImpressionTagCount = 3
+    private let maxFoodPairingTagCount = 2
+
+    private var session: ReviewSession? {
+        store.session(id: sessionId)
+    }
+
+    private var wine: Wine? {
+        guard let session else { return nil }
+        return store.wine(id: session.wineId)
+    }
+
+    private var profile: TastingProfile {
+        TastingProfile.resolve(from: wine?.type ?? session?.tastingInput?.wineType)
+    }
 
     var body: some View {
         Form {
-            if let session = store.session(id: sessionId), let wine = store.wine(id: session.wineId) {
-                Section("ワイン概要") {
-                    Text(wine.name)
-                    Text(wine.shortSummary)
+            if let wine {
+                Section {
+                    WineOverviewCard(wine: wine)
+                    if let url = wine.notionUrl {
+                        Button {
+                            openURL(url)
+                        } label: {
+                            Label("Notionで開く", systemImage: "arrow.up.right.square")
+                        }
+                    }
+                }
+            }
+            if let session {
+                Section("Rating・試飲日") {
+                    DetailRow("Rating", session.rating)
+                    DetailRow("試飲日", dateText(session.tastingDate))
+                    if !session.ratingNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        DetailRow("評価補足", session.ratingNote)
+                    }
+                }
+            }
+            Section {
+                ForEach(profile.sliderLabels, id: \.self) { label in
+                    SliderRatingRow(
+                        label: label,
+                        value: bindingForSlider(label),
+                        range: sliderRange
+                    )
+                }
+            } header: {
+                HStack {
+                    Text("\(profile.wineType)の味わい")
+                    Spacer()
+                    Text("1:少ない  5:多い")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            Section("初回生成テキスト") {
-                TextEditor(text: $text)
-                    .frame(minHeight: 220)
-                Text("\(text.count)文字")
+            Section("印象・飲み口タグ") {
+                TagSelectionGrid(
+                    tags: profile.impressionTags,
+                    selectedTags: selectedImpressionTags,
+                    selectionLimit: maxImpressionTagCount,
+                    toggle: toggleImpressionTag
+                )
+                Text("最大\(maxImpressionTagCount)個まで選択できます。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                DisclosureGroup("料理との相性も入力する", isExpanded: $isFoodSectionExpanded) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        TagSelectionGrid(
+                            tags: TastingProfile.foodPairingTags,
+                            selectedTags: selectedFoodPairingTags,
+                            selectionLimit: maxFoodPairingTagCount,
+                            toggle: toggleFoodPairingTag
+                        )
+                        Text("最大\(maxFoodPairingTagCount)個まで選択できます。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+            Section("自由メモ") {
+                TextEditor(text: $freeNote)
+                    .frame(minHeight: 120)
+                Text("例: 香りが良く、酸味がきれい。和食にも合わせやすかった。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("レビュー文体・文字数") {
+                TextEditor(text: $promptText)
+                    .frame(minHeight: 180)
+                Text("\(promptText.count)文字")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Section {
                 Button {
-                    saveText()
+                    saveInputs()
                     store.path.append(.aiReview(sessionId))
                     Task { await store.generateCandidates(sessionId: sessionId) }
                 } label: {
@@ -482,22 +570,194 @@ struct InitialPromptEditorView: View {
                         Label("AIでレビュー案を作成", systemImage: "sparkles")
                     }
                 }
-                .disabled(store.isGenerating || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(store.isGenerating || promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .navigationTitle("初回テキスト")
+        .navigationTitle("テースティング入力・レビュー生成準備")
         .onAppear {
-            text = store.session(id: sessionId)?.initialGenerationText ?? store.settings.template1
+            loadInputs()
         }
         .onDisappear {
-            saveText()
+            saveInputs()
         }
     }
 
-    private func saveText() {
+    private func loadInputs() {
+        promptText = session?.initialGenerationText ?? store.settings.template1
+
+        let currentProfile = profile
+        var resolvedSliders = Dictionary(uniqueKeysWithValues: currentProfile.sliderLabels.map { ($0, 3) })
+        if let existing = session?.tastingInput {
+            for label in currentProfile.sliderLabels {
+                if let value = existing.sliders[label] {
+                    resolvedSliders[label] = min(max(value, sliderRange.lowerBound), sliderRange.upperBound)
+                }
+            }
+            selectedImpressionTags = existing.impressionTags.filter(currentProfile.impressionTags.contains)
+            selectedFoodPairingTags = existing.foodPairingTags.filter(TastingProfile.foodPairingTags.contains)
+            freeNote = existing.freeNote
+            isFoodSectionExpanded = !selectedFoodPairingTags.isEmpty
+        } else {
+            selectedImpressionTags = []
+            selectedFoodPairingTags = []
+            freeNote = ""
+            isFoodSectionExpanded = false
+        }
+        sliderValues = resolvedSliders
+    }
+
+    private func saveInputs() {
         guard var session = store.session(id: sessionId) else { return }
-        session.initialGenerationText = text
+        session.initialGenerationText = promptText
+        session.tastingInput = TastingInput(
+            wineType: profile.wineType,
+            sliders: orderedSliderDictionary(),
+            impressionTags: selectedImpressionTags,
+            foodPairingTags: selectedFoodPairingTags,
+            freeNote: freeNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         store.updateSession(session)
+    }
+
+    private func orderedSliderDictionary() -> [String: Int] {
+        Dictionary(uniqueKeysWithValues: profile.sliderLabels.map { label in
+            (label, min(max(sliderValues[label] ?? 3, sliderRange.lowerBound), sliderRange.upperBound))
+        })
+    }
+
+    private func bindingForSlider(_ label: String) -> Binding<Int> {
+        Binding(
+            get: { sliderValues[label] ?? 3 },
+            set: { sliderValues[label] = $0 }
+        )
+    }
+
+    private func toggleImpressionTag(_ tag: String) {
+        if selectedImpressionTags.contains(tag) {
+            selectedImpressionTags.removeAll { $0 == tag }
+        } else if selectedImpressionTags.count < maxImpressionTagCount {
+            selectedImpressionTags.append(tag)
+        }
+    }
+
+    private func toggleFoodPairingTag(_ tag: String) {
+        if selectedFoodPairingTags.contains(tag) {
+            selectedFoodPairingTags.removeAll { $0 == tag }
+        } else if selectedFoodPairingTags.count < maxFoodPairingTagCount {
+            selectedFoodPairingTags.append(tag)
+        }
+    }
+}
+
+struct WineOverviewCard: View {
+    let wine: Wine
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(wine.name)
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                DetailRow("Type", wine.type)
+                DetailRow("Country", wine.country)
+                DetailRow("Region", wine.region)
+                DetailRow("Cepage", wine.cepage.isEmpty ? nil : wine.cepage.joined(separator: ", "))
+                DetailRow("Price", wine.price.map { "¥\($0)" })
+                DetailRow("Rating", wine.rating)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Detail")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(detailExcerpt)
+                    .font(.subheadline)
+                    .foregroundStyle(detailExcerpt == "未設定" ? .secondary : .primary)
+                    .lineLimit(4)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var detailExcerpt: String {
+        let source = wine.detailAccented ?? wine.detail
+        let trimmed = source?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "未設定" }
+        if trimmed.count <= 140 {
+            return trimmed
+        }
+        return String(trimmed.prefix(140)) + "…"
+    }
+}
+
+struct SliderRatingRow: View {
+    let label: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(label)
+                Spacer()
+                Text("\(value)")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { value = Int($0.rounded()) }
+                ),
+                in: Double(range.lowerBound)...Double(range.upperBound),
+                step: 1
+            )
+            HStack {
+                Text("\(range.lowerBound)")
+                Spacer()
+                Text("\(range.upperBound)")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+struct TagSelectionGrid: View {
+    let tags: [String]
+    let selectedTags: [String]
+    let selectionLimit: Int
+    let toggle: (String) -> Void
+
+    private let columns = [GridItem(.adaptive(minimum: 88), spacing: 8)]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            ForEach(tags, id: \.self) { tag in
+                let isSelected = selectedTags.contains(tag)
+                Button {
+                    toggle(tag)
+                } label: {
+                    Text(tag)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
+                        .background(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+                        .clipShape(Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
+                        }
+                }
+                .buttonStyle(.plain)
+                .disabled(!isSelected && selectedTags.count >= selectionLimit)
+                .opacity(!isSelected && selectedTags.count >= selectionLimit ? 0.45 : 1)
+            }
+        }
     }
 }
 
@@ -540,10 +800,11 @@ struct AIReviewView: View {
 
                 Section("再生成用テキスト") {
                     HStack {
-                        Button("短く") { feedback += "\nもっと短く。" }
-                        Button("詳しく") { feedback += "\n具体的な要素を少し追加。" }
-                        Button("自然に") { feedback += "\nより自然な言い回しに。" }
+                        Button("短く") { appendFeedbackPreset("もっと短く。") }
+                        Button("詳しく") { appendFeedbackPreset("具体的な要素を少し追加。") }
+                        Button("自然に") { appendFeedbackPreset("より自然な言い回しに。") }
                     }
+                    .buttonStyle(.borderless)
                     TextEditor(text: $feedback)
                         .frame(minHeight: 140)
                     Button {
@@ -613,6 +874,11 @@ struct AIReviewView: View {
         session.finalGenerationText = feedback
         session.finalComment = finalComment
         store.updateSession(session)
+    }
+
+    private func appendFeedbackPreset(_ preset: String) {
+        let trimmed = feedback.trimmingCharacters(in: .whitespacesAndNewlines)
+        feedback = trimmed.isEmpty ? preset : "\(trimmed)\n\(preset)"
     }
 }
 
