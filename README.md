@@ -189,3 +189,13 @@ xcodebuild -project WineReview.xcodeproj \
 
 - [アプリ仕様書](docs/wine-review-ios-app-spec.md)
 - [技術説明書](docs/wine-review-ios-technical-design.md)
+
+# License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Author
+
+Copyright (c) 2026 HiroPublic
+
+This project was developed with assistance from generative AI.

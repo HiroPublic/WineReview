@@ -4,7 +4,7 @@ protocol NotionWineRepositoryProtocol {
     func queryInventory() async throws -> InventorySnapshot
     func queryStockWines() async throws -> [Wine]
     func retrieveWine(pageId: String) async throws -> Wine
-    func updateReview(pageId: String, rating: String, tastingDate: Date, markOutOfStock: Bool, comment: String) async -> SaveResult
+    func updateReview(pageId: String, rating: String, tastingDate: Date, markOutOfStock: Bool, evaluation: Bool, comment: String) async -> SaveResult
 }
 
 struct NotionWineRepository: NotionWineRepositoryProtocol {
@@ -75,18 +75,19 @@ struct NotionWineRepository: NotionWineRepositoryProtocol {
             comments: comments,
             tastingDate: parsedWine.tastingDate,
             purchaseDate: parsedWine.purchaseDate,
-            stock: parsedWine.stock
+            stock: parsedWine.stock,
+            evaluation: parsedWine.evaluation
         )
         return wine
     }
 
-    func updateReview(pageId: String, rating: String, tastingDate: Date, markOutOfStock: Bool, comment: String) async -> SaveResult {
+    func updateReview(pageId: String, rating: String, tastingDate: Date, markOutOfStock: Bool, evaluation: Bool, comment: String) async -> SaveResult {
         var failures: [SaveFailure] = []
         var propertySucceeded = false
         var commentSucceeded = false
 
         do {
-            try await updatePageProperties(pageId: pageId, rating: rating, tastingDate: tastingDate, markOutOfStock: markOutOfStock)
+            try await updatePageProperties(pageId: pageId, rating: rating, tastingDate: tastingDate, markOutOfStock: markOutOfStock, evaluation: evaluation)
             propertySucceeded = true
         } catch {
             failures.append(SaveFailure(operation: "properties", message: friendlyFailureMessage(for: error, operation: "properties")))
@@ -102,13 +103,16 @@ struct NotionWineRepository: NotionWineRepositoryProtocol {
         return SaveResult(propertyUpdateSucceeded: propertySucceeded, commentWriteSucceeded: commentSucceeded, failures: failures)
     }
 
-    private func updatePageProperties(pageId: String, rating: String, tastingDate: Date, markOutOfStock: Bool) async throws {
+    private func updatePageProperties(pageId: String, rating: String, tastingDate: Date, markOutOfStock: Bool, evaluation: Bool) async throws {
         let page = try await request(path: "/v1/pages/\(pageId)", method: "GET", payload: nil)
         let currentProperties = (page as? [String: Any])?["properties"] as? [String: Any] ?? [:]
         var properties: [String: Any] = [:]
 
         properties[mapping.rating] = propertyUpdate(for: currentProperties[mapping.rating], text: rating)
         properties[mapping.tastingDate] = datePropertyUpdate(for: currentProperties[mapping.tastingDate], date: tastingDate)
+        properties[mapping.evaluation] = [
+            "checkbox": evaluation
+        ]
         properties[mapping.stock] = [
             "checkbox": !markOutOfStock
         ]
@@ -221,7 +225,8 @@ struct NotionWineRepository: NotionWineRepositoryProtocol {
             comments: [],
             tastingDate: date(properties[mapping.tastingDate]),
             purchaseDate: date(properties[mapping.purchaseDate]),
-            stock: checkbox(properties[mapping.stock]) ?? false
+            stock: checkbox(properties[mapping.stock]) ?? false,
+            evaluation: checkbox(properties[mapping.evaluation]) ?? false
         )
     }
 
@@ -328,6 +333,10 @@ struct NotionWineRepository: NotionWineRepositoryProtocol {
         dayFormatter.calendar = Calendar(identifier: .gregorian)
         dayFormatter.locale = Locale(identifier: "en_US_POSIX")
         dayFormatter.dateFormat = "yyyy-MM-dd"
+        if let parsed = dayFormatter.date(from: start) {
+            return parsed
+        }
+        dayFormatter.dateFormat = "yyyy/MM/dd"
         return dayFormatter.date(from: start)
     }
 
@@ -400,7 +409,7 @@ struct NotionWineRepository: NotionWineRepositoryProtocol {
         if let value = Double(text) {
             return value
         }
-        let starCount = text.filter { $0 == "★" }.count
+        let starCount = text.filter { $0 == "★" || $0 == "*" }.count
         return Double(max(starCount, 0))
     }
 }

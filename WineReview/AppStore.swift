@@ -75,10 +75,11 @@ final class AppStore: ObservableObject {
         let session = ReviewSession(
             id: id,
             wineId: wine.id,
-            rating: wine.rating ?? "★★★",
+            rating: smallStarRating(from: wine.rating ?? "***"),
             ratingNote: "",
             tastingDate: Date(),
             markOutOfStock: true,
+            evaluation: wine.evaluation,
             initialGenerationText: settings.template1,
             tastingInput: nil,
             candidateComments: [],
@@ -202,6 +203,7 @@ final class AppStore: ObservableObject {
             rating: session.rating,
             tastingDate: session.tastingDate,
             markOutOfStock: session.markOutOfStock,
+            evaluation: session.evaluation,
             comment: session.finalComment
         )
         lastSaveResult = result

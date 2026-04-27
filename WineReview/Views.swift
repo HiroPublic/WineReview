@@ -398,8 +398,9 @@ struct RatingInputView: View {
     @State private var ratingNote = ""
     @State private var tastingDate = Date()
     @State private var markOutOfStock = true
+    @State private var evaluation = false
 
-    private let ratingOptions = ["★", "★★", "★★★", "★★★★", "★★★★★"]
+    private let ratingOptions = ["*", "**", "***", "****", "*****"]
 
     var body: some View {
         Form {
@@ -407,6 +408,7 @@ struct RatingInputView: View {
                 Section("対象ワイン") {
                     Text(wine.name)
                     DetailRow("現在のRating", wine.rating)
+                    DetailRow("現在の評価", wine.evaluation ? "オン" : "オフ")
                 }
             }
             Section("評価") {
@@ -416,17 +418,19 @@ struct RatingInputView: View {
                 TextField("評価補足", text: $ratingNote, axis: .vertical)
                     .lineLimit(2...4)
                 DatePicker("試飲日", selection: $tastingDate, displayedComponents: .date)
+                Toggle("評価", isOn: $evaluation)
                 Toggle("保存時にStockを在庫なしへ変更", isOn: $markOutOfStock)
             }
             Section {
                 Button {
                     guard let wine = store.wine(id: wineId) else { return }
                     let id = sessionId ?? store.createSession(for: wine)
-                    var session = store.session(id: id) ?? ReviewSession(id: id, wineId: wine.id, rating: rating, ratingNote: "", tastingDate: Date(), markOutOfStock: true, initialGenerationText: store.settings.template1, candidateComments: [], finalGenerationText: store.settings.template2, drafts: [], finalComment: "")
+                    var session = store.session(id: id) ?? ReviewSession(id: id, wineId: wine.id, rating: rating, ratingNote: "", tastingDate: Date(), markOutOfStock: true, evaluation: wine.evaluation, initialGenerationText: store.settings.template1, candidateComments: [], finalGenerationText: store.settings.template2, drafts: [], finalComment: "")
                     session.rating = rating
                     session.ratingNote = ratingNote
                     session.tastingDate = tastingDate
                     session.markOutOfStock = markOutOfStock
+                    session.evaluation = evaluation
                     store.updateSession(session)
                     store.path.append(.initialPrompt(id))
                 } label: {
@@ -438,12 +442,14 @@ struct RatingInputView: View {
         .onAppear {
             if let existing = store.sessions.values.first(where: { $0.wineId == wineId }) {
                 sessionId = existing.id
-                rating = existing.rating
+                rating = smallStarRating(from: existing.rating)
                 ratingNote = existing.ratingNote
                 tastingDate = existing.tastingDate
                 markOutOfStock = existing.markOutOfStock
+                evaluation = existing.evaluation
             } else if let wine = store.wine(id: wineId) {
-                rating = wine.rating ?? "★★★"
+                rating = smallStarRating(from: wine.rating ?? "***")
+                evaluation = wine.evaluation
             }
         }
     }
@@ -892,6 +898,7 @@ struct FinalConfirmationView: View {
                 Section("保存内容") {
                     Text(wine.name)
                     DetailRow("Rating", session.rating)
+                    DetailRow("評価", session.evaluation ? "オン" : "オフ")
                     DetailRow("Stock", session.markOutOfStock ? "falseへ更新" : "変更しない")
                     DetailRow("tasting date", dateText(session.tastingDate))
                 }
@@ -995,6 +1002,7 @@ struct SettingsView: View {
                 TextField("Title", text: $store.settings.propertyMapping.title)
                 TextField("Stock", text: $store.settings.propertyMapping.stock)
                 TextField("Rating", text: $store.settings.propertyMapping.rating)
+                TextField("評価", text: $store.settings.propertyMapping.evaluation)
                 TextField("Type", text: $store.settings.propertyMapping.type)
                 TextField("Country", text: $store.settings.propertyMapping.country)
                 TextField("Region", text: $store.settings.propertyMapping.region)

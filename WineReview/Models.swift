@@ -51,6 +51,7 @@ struct NotionPropertyMapping: Codable, Equatable {
     var title: String = "Name"
     var stock: String = "Stock"
     var rating: String = "Rating"
+    var evaluation: String = "評価"
     var type: String = "Type"
     var country: String = "Country"
     var region: String = "Region"
@@ -60,6 +61,41 @@ struct NotionPropertyMapping: Codable, Equatable {
     var detail: String = "Detail"
     var tastingDate: String = "tasting date"
     var purchaseDate: String = "Purchase date"
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case stock
+        case rating
+        case evaluation
+        case type
+        case country
+        case region
+        case cave
+        case cepage
+        case price
+        case detail
+        case tastingDate
+        case purchaseDate
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? title
+        stock = try container.decodeIfPresent(String.self, forKey: .stock) ?? stock
+        rating = try container.decodeIfPresent(String.self, forKey: .rating) ?? rating
+        evaluation = try container.decodeIfPresent(String.self, forKey: .evaluation) ?? evaluation
+        type = try container.decodeIfPresent(String.self, forKey: .type) ?? type
+        country = try container.decodeIfPresent(String.self, forKey: .country) ?? country
+        region = try container.decodeIfPresent(String.self, forKey: .region) ?? region
+        cave = try container.decodeIfPresent(String.self, forKey: .cave) ?? cave
+        cepage = try container.decodeIfPresent(String.self, forKey: .cepage) ?? cepage
+        price = try container.decodeIfPresent(String.self, forKey: .price) ?? price
+        detail = try container.decodeIfPresent(String.self, forKey: .detail) ?? detail
+        tastingDate = try container.decodeIfPresent(String.self, forKey: .tastingDate) ?? tastingDate
+        purchaseDate = try container.decodeIfPresent(String.self, forKey: .purchaseDate) ?? purchaseDate
+    }
 }
 
 struct AppSettings: Codable, Equatable {
@@ -95,6 +131,7 @@ struct Wine: Identifiable, Equatable, Hashable {
     let tastingDate: Date?
     let purchaseDate: Date?
     let stock: Bool
+    let evaluation: Bool
 
     var shortSummary: String {
         [
@@ -122,6 +159,7 @@ struct ReviewSession: Identifiable, Codable, Equatable {
     var ratingNote: String
     var tastingDate: Date
     var markOutOfStock: Bool
+    var evaluation: Bool
     var initialGenerationText: String
     var tastingInput: TastingInput?
     var candidateComments: [String]
@@ -136,6 +174,7 @@ struct ReviewSession: Identifiable, Codable, Equatable {
         case ratingNote
         case tastingDate
         case markOutOfStock
+        case evaluation
         case initialGenerationText
         case tastingInput
         case candidateComments
@@ -151,6 +190,7 @@ struct ReviewSession: Identifiable, Codable, Equatable {
         ratingNote: String,
         tastingDate: Date,
         markOutOfStock: Bool,
+        evaluation: Bool,
         initialGenerationText: String,
         tastingInput: TastingInput? = nil,
         candidateComments: [String],
@@ -164,6 +204,7 @@ struct ReviewSession: Identifiable, Codable, Equatable {
         self.ratingNote = ratingNote
         self.tastingDate = tastingDate
         self.markOutOfStock = markOutOfStock
+        self.evaluation = evaluation
         self.initialGenerationText = initialGenerationText
         self.tastingInput = tastingInput
         self.candidateComments = candidateComments
@@ -180,6 +221,7 @@ struct ReviewSession: Identifiable, Codable, Equatable {
         ratingNote = try container.decodeIfPresent(String.self, forKey: .ratingNote) ?? ""
         tastingDate = try container.decodeIfPresent(Date.self, forKey: .tastingDate) ?? Date()
         markOutOfStock = try container.decodeIfPresent(Bool.self, forKey: .markOutOfStock) ?? true
+        evaluation = try container.decodeIfPresent(Bool.self, forKey: .evaluation) ?? false
         initialGenerationText = try container.decodeIfPresent(String.self, forKey: .initialGenerationText) ?? ""
         tastingInput = try container.decodeIfPresent(TastingInput.self, forKey: .tastingInput)
         candidateComments = try container.decodeIfPresent([String].self, forKey: .candidateComments) ?? []
@@ -213,6 +255,12 @@ struct TastingInput: Codable, Equatable {
     let impressionTags: [String]
     let foodPairingTags: [String]
     let freeNote: String
+}
+
+func smallStarRating(from text: String) -> String {
+    let starCount = text.filter { $0 == "★" || $0 == "*" }.count
+    guard starCount > 0 else { return text.isEmpty ? "***" : text }
+    return String(repeating: "*", count: min(starCount, 5))
 }
 
 struct TastingProfile: Equatable {
@@ -338,7 +386,7 @@ extension Date {
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.dateFormat = "yyyy/MM/dd"
         return formatter.string(from: self)
     }
 }
