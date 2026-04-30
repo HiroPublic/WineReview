@@ -146,6 +146,34 @@ xcodebuild -project WineReview.xcodeproj \
   build
 ```
 
+### 実機アプリの署名期限更新
+
+Xcodeのローカル/限定的な開発用署名では、実機に入れたアプリが短期間で失効する場合があります。現在の署名期限を確認し、残り日数が少なければ自動で再ビルドして実機へ再インストールするには、次のコマンドを使います。
+
+```sh
+python3 scripts/refresh_ios_profile.py --threshold-days 2 --device-name "Your iPhone Name"
+```
+
+動作確認だけを行う場合は`--dry-run`を付けます。
+
+```sh
+python3 scripts/refresh_ios_profile.py --threshold-days 2 --device-name "Your iPhone Name" --dry-run
+```
+
+ログイン時、1時間ごと、8:30に自動実行するLaunchAgentを作成する場合は、次のコマンドを使います。
+
+```sh
+python3 scripts/install_profile_refresh_agent.py --device-name "Your iPhone Name" --load
+```
+
+生成されるplistを確認するだけなら`--dry-run`を付けます。
+
+```sh
+python3 scripts/install_profile_refresh_agent.py --device-name "Your iPhone Name" --dry-run
+```
+
+端末名をコマンドに残したくない場合は、`WINE_REVIEW_DEVICE_NAME`または`WINE_REVIEW_DEVICE_ID`を環境変数で指定できます。
+
 ## テスト
 
 プロンプト設定まわりのリグレッションテストを含めています。
