@@ -736,10 +736,8 @@ struct TagSelectionGrid: View {
     let selectionLimit: Int
     let toggle: (String) -> Void
 
-    private let columns = [GridItem(.adaptive(minimum: 88), spacing: 8)]
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+        WrappingTagLayout(horizontalSpacing: 8, verticalSpacing: 8) {
             ForEach(tags, id: \.self) { tag in
                 let isSelected = selectedTags.contains(tag)
                 Button {
@@ -747,10 +745,11 @@ struct TagSelectionGrid: View {
                 } label: {
                     Text(tag)
                         .font(.subheadline)
-                        .lineLimit(1)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity)
                         .background(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
                         .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
                         .clipShape(Capsule())
@@ -764,6 +763,96 @@ struct TagSelectionGrid: View {
                 .opacity(!isSelected && selectedTags.count >= selectionLimit ? 0.45 : 1)
             }
         }
+    }
+}
+
+struct WrappingTagLayout: Layout {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        layout(in: proposal.width ?? .greatestFiniteMagnitude, subviews: subviews).size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let rows = layout(in: bounds.width, subviews: subviews).rows
+
+        for row in rows {
+            for item in row.items {
+                subviews[item.index].place(
+                    at: CGPoint(x: bounds.minX + item.x, y: bounds.minY + row.y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(item.size)
+                )
+            }
+        }
+    }
+
+    private func layout(in maxWidth: CGFloat, subviews: Subviews) -> (rows: [Row], size: CGSize) {
+        var rows: [Row] = []
+        var currentItems: [Item] = []
+        var currentX: CGFloat = 0
+        var currentHeight: CGFloat = 0
+        var y: CGFloat = 0
+        var widestRow: CGFloat = 0
+
+        for index in subviews.indices {
+            let size = size(for: subviews[index], maxWidth: maxWidth)
+            let itemSpacing = currentItems.isEmpty ? 0 : horizontalSpacing
+
+            if !currentItems.isEmpty, currentX + itemSpacing + size.width > maxWidth {
+                rows.append(Row(y: y, height: currentHeight, items: currentItems))
+                widestRow = max(widestRow, currentX)
+                y += currentHeight + verticalSpacing
+                currentItems = []
+                currentX = 0
+                currentHeight = 0
+            }
+
+            let x = currentItems.isEmpty ? 0 : currentX + horizontalSpacing
+            currentItems.append(Item(index: index, x: x, size: size))
+            currentX = x + size.width
+            currentHeight = max(currentHeight, size.height)
+        }
+
+        if !currentItems.isEmpty {
+            rows.append(Row(y: y, height: currentHeight, items: currentItems))
+            widestRow = max(widestRow, currentX)
+        }
+
+        let totalHeight = rows.last.map { $0.y + $0.height } ?? 0
+        return (rows, CGSize(width: min(widestRow, maxWidth), height: totalHeight))
+    }
+
+    private func size(for subview: LayoutSubview, maxWidth: CGFloat) -> CGSize {
+        let naturalSize = subview.sizeThatFits(.unspecified)
+
+        guard naturalSize.width > maxWidth else {
+            return naturalSize
+        }
+
+        return subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+    }
+
+    private struct Row {
+        let y: CGFloat
+        let height: CGFloat
+        let items: [Item]
+    }
+
+    private struct Item {
+        let index: Int
+        let x: CGFloat
+        let size: CGSize
     }
 }
 
