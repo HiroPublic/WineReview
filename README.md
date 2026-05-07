@@ -4,6 +4,8 @@ Wine Reviewは、Notionで管理しているワイン在庫からレビュー対
 
 NotionのWine Trackerデータベースから在庫ありワインを取得し、OpenAIまたはGeminiでレビュー文を生成したうえで、最終コメント、Rating、試飲日、在庫状態をNotionへ書き戻します。S05では、ワインタイプ別のスライダー入力、印象タグ、料理相性タグ、自由メモを使って、AIへ渡すテースティング情報を構造化して入力できます。
 
+レビュー文の言語化イメージを深める参考として、[「美味しい」の先を言葉にしたい | 南アフリカワインのティスティング言語化トレーニング](https://note.com/dr830821/n/nc06edfb216da) も参照できます。
+
 ## 主な機能
 
 - Notionデータベースで`Stock`がチェックされているワインを一覧表示
@@ -159,6 +161,8 @@ python3 scripts/refresh_ios_profile.py --threshold-days 2 --device-name "Your iP
 ```sh
 python3 scripts/refresh_ios_profile.py --threshold-days 2 --device-name "Your iPhone Name" --dry-run
 ```
+
+ビルドとインストールが完了してもprofile期限が延びなかった場合は、同じ期限に対して12時間は再試行しません。
 
 ログイン時、1時間ごと、8:30に自動実行するLaunchAgentを作成する場合は、次のコマンドを使います。
 
