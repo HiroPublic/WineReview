@@ -117,6 +117,7 @@ struct Wine: Identifiable, Equatable, Hashable {
     let id: String
     let notionPageId: String
     let notionUrl: URL?
+    let coverImageURL: URL?
     let name: String
     let type: String?
     let rating: String?

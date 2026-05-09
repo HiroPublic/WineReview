@@ -62,6 +62,7 @@ struct NotionWineRepository: NotionWineRepositoryProtocol {
             id: parsedWine.id,
             notionPageId: parsedWine.notionPageId,
             notionUrl: parsedWine.notionUrl,
+            coverImageURL: parsedWine.coverImageURL,
             name: parsedWine.name,
             type: parsedWine.type,
             rating: parsedWine.rating,
@@ -212,6 +213,7 @@ struct NotionWineRepository: NotionWineRepositoryProtocol {
             id: id,
             notionPageId: id,
             notionUrl: url,
+            coverImageURL: coverURL(page["cover"]),
             name: name,
             type: selectName(properties[mapping.type]),
             rating: propertyText(properties[mapping.rating]),
@@ -228,6 +230,23 @@ struct NotionWineRepository: NotionWineRepositoryProtocol {
             stock: checkbox(properties[mapping.stock]) ?? false,
             evaluation: checkbox(properties[mapping.evaluation]) ?? false
         )
+    }
+
+    private func coverURL(_ cover: Any?) -> URL? {
+        guard let cover = cover as? [String: Any],
+              let type = cover["type"] as? String else {
+            return nil
+        }
+        switch type {
+        case "external":
+            let external = cover["external"] as? [String: Any]
+            return (external?["url"] as? String).flatMap(URL.init(string:))
+        case "file":
+            let file = cover["file"] as? [String: Any]
+            return (file?["url"] as? String).flatMap(URL.init(string:))
+        default:
+            return nil
+        }
     }
 
     private func resolvedTitle(from properties: [String: Any]) -> String {

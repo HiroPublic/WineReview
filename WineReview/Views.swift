@@ -117,11 +117,20 @@ struct InventoryWineListView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var searchText = ""
     @State private var sortMode = SortMode.purchaseDate
+    @State private var displayMode = DisplayMode.list
+    @State private var selectedVisualWine: Wine?
 
     enum SortMode: String, CaseIterable, Identifiable {
         case purchaseDate = "購入日"
         case name = "名前"
         case price = "価格"
+
+        var id: String { rawValue }
+    }
+
+    enum DisplayMode: String, CaseIterable, Identifiable {
+        case list = "一覧"
+        case visual = "ビジュアル"
 
         var id: String { rawValue }
     }
@@ -144,51 +153,81 @@ struct InventoryWineListView: View {
         horizontalSizeClass == .regular
     }
 
-    var body: some View {
-        Group {
-            if store.isLoading && store.wines.isEmpty {
-                ProgressView("在庫ワインを取得中")
-            } else if filteredWines.isEmpty {
-                ContentUnavailableView("在庫ありのワインがありません", systemImage: "wineglass", description: Text("再読み込みするか、設定を確認してください。"))
-            } else {
-                ScrollView {
-                    if usesGridLayout {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 520), spacing: 16)], spacing: 16) {
-                            ForEach(filteredWines) { wine in
-                                NavigationLink(value: AppRoute.wineDetail(wine.id)) {
-                                    WineCardView(wine: wine)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(20)
-                    } else {
-                        LazyVStack(spacing: 0) {
-                            ForEach(filteredWines) { wine in
-                                NavigationLink(value: AppRoute.wineDetail(wine.id)) {
-                                    WineRowView(wine: wine)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 10)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
+    private var visualGridColumns: [GridItem] {
+        [GridItem(.flexible(), spacing: 16)]
+    }
 
-                                Divider()
-                                    .padding(.leading, 16)
-                            }
-                        }
-                        .background(.background)
-                    }
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("表示", selection: $displayMode) {
+                ForEach(DisplayMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
-                .refreshable {
-                    await store.loadInventory(forceRefresh: true)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+
+            Group {
+                if store.isLoading && store.wines.isEmpty {
+                    ProgressView("在庫ワインを取得中")
+                } else if filteredWines.isEmpty {
+                    ContentUnavailableView("在庫ありのワインがありません", systemImage: "wineglass", description: Text("再読み込みするか、設定を確認してください。"))
+                } else {
+                    ScrollView {
+                        if displayMode == .visual {
+                            LazyVGrid(columns: visualGridColumns, spacing: 16) {
+                                ForEach(filteredWines) { wine in
+                                    WineVisualCardView(
+                                        wine: wine,
+                                        onImageTap: { selectedVisualWine = wine },
+                                        onTextTap: { store.path.append(.wineDetail(wine.id)) }
+                                    )
+                                }
+                            }
+                            .padding(16)
+                        } else if usesGridLayout {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 520), spacing: 16)], spacing: 16) {
+                                ForEach(filteredWines) { wine in
+                                    NavigationLink(value: AppRoute.wineDetail(wine.id)) {
+                                        WineCardView(wine: wine)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(20)
+                        } else {
+                            LazyVStack(spacing: 0) {
+                                ForEach(filteredWines) { wine in
+                                    NavigationLink(value: AppRoute.wineDetail(wine.id)) {
+                                        WineRowView(wine: wine)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Divider()
+                                        .padding(.leading, 16)
+                                }
+                            }
+                            .background(.background)
+                        }
+                    }
+                    .refreshable {
+                        await store.loadInventory(forceRefresh: true)
+                    }
                 }
             }
         }
         .searchable(text: $searchText, prompt: "ワイン名、国、品種で検索")
         .navigationTitle("在庫ワイン")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $selectedVisualWine) { wine in
+            WineImagePreviewSheet(wine: wine)
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -231,6 +270,135 @@ struct InventoryWineListView: View {
                 await store.loadInventory(forceRefresh: false)
             }
         }
+    }
+}
+
+struct WineVisualCardView: View {
+    let wine: Wine
+    let onImageTap: () -> Void
+    let onTextTap: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: onImageTap) {
+                WineCoverImageView(url: wine.coverImageURL, height: 220)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onTextTap) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(wine.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    if !wine.shortSummary.isEmpty {
+                        Text(wine.shortSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(.background)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.quaternary)
+        }
+    }
+}
+
+struct WineCoverImageView: View {
+    let url: URL?
+    var height: CGFloat = 220
+
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholder
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var placeholder: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "photo")
+                .font(.title2)
+            Text("カバー画像なし")
+                .font(.caption)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.thinMaterial)
+    }
+}
+
+struct WineImagePreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let wine: Wine
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                VStack(spacing: 16) {
+                    WineCoverImageView(url: wine.coverImageURL, height: 420)
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .padding(.horizontal, 20)
+                    VStack(spacing: 6) {
+                        Text(wine.name)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                        if !wine.shortSummary.isEmpty {
+                            Text(wine.shortSummary)
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 24)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.top, 24)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("閉じる") {
+                        dismiss()
+                    }
+                    .foregroundStyle(.white)
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+        }
+        .presentationBackground(.black)
     }
 }
 
@@ -872,11 +1040,7 @@ struct AIReviewView: View {
                     }
                     ForEach(Array(session.candidateComments.enumerated()), id: \.offset) { index, candidate in
                         Button {
-                            if selectedCandidates.contains(index) {
-                                selectedCandidates.remove(index)
-                            } else {
-                                selectedCandidates.insert(index)
-                            }
+                            toggleCandidateSelection(index: index, session: session)
                         } label: {
                             HStack(alignment: .top) {
                                 Image(systemName: selectedCandidates.contains(index) ? "checkmark.circle.fill" : "circle")
@@ -974,6 +1138,22 @@ struct AIReviewView: View {
     private func appendFeedbackPreset(_ preset: String) {
         let trimmed = feedback.trimmingCharacters(in: .whitespacesAndNewlines)
         feedback = trimmed.isEmpty ? preset : "\(trimmed)\n\(preset)"
+    }
+
+    private func toggleCandidateSelection(index: Int, session: ReviewSession) {
+        if selectedCandidates.contains(index) {
+            selectedCandidates.remove(index)
+        } else {
+            selectedCandidates.insert(index)
+        }
+
+        guard selectedCandidates.count == 1,
+              let selectedIndex = selectedCandidates.first,
+              session.candidateComments.indices.contains(selectedIndex) else {
+            return
+        }
+
+        finalComment = session.candidateComments[selectedIndex]
     }
 }
 
