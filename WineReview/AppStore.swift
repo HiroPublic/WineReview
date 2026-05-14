@@ -14,18 +14,23 @@ final class AppStore: ObservableObject {
     @Published var message: String?
     @Published var lastSaveResult: SaveResult?
     @Published var totalWineCount = 0
+    @Published var installationProfileStatus: AppInstallationProfileStatus?
+    @Published var installationProfileErrorMessage: String?
 
     private let settingsStore = SettingsStore()
     private let draftStore = DraftStore()
+    private let installationProfileReader = AppInstallationProfileReader()
 
     init() {
         let loaded = settingsStore.load()
         settings = loaded
         config = settingsStore.config(from: loaded)
         sessions = draftStore.load()
+        refreshInstallationProfileStatus()
     }
 
     func bootstrap() async {
+        refreshInstallationProfileStatus()
         if config.missingConfigMessage == nil {
             await loadInventory(forceRefresh: true)
         } else {
@@ -37,6 +42,16 @@ final class AppStore: ObservableObject {
         settingsStore.save(settings)
         config = settingsStore.config(from: settings)
         message = "設定を保存しました。"
+    }
+
+    func refreshInstallationProfileStatus() {
+        do {
+            installationProfileStatus = try installationProfileReader.read(from: .main)
+            installationProfileErrorMessage = nil
+        } catch {
+            installationProfileStatus = nil
+            installationProfileErrorMessage = error.localizedDescription
+        }
     }
 
     func loadInventory(forceRefresh: Bool) async {

@@ -162,6 +162,64 @@ final class DraftStore {
     }
 }
 
+struct AppInstallationProfileStatus: Equatable {
+    let expirationDate: Date
+
+    func remainingInterval(from now: Date = Date()) -> TimeInterval {
+        expirationDate.timeIntervalSince(now)
+    }
+
+    func isExpiringWithin24Hours(from now: Date = Date()) -> Bool {
+        remainingInterval(from: now) < 24 * 60 * 60
+    }
+}
+
+enum AppInstallationProfileError: LocalizedError, Equatable {
+    case profileNotFound
+    case invalidProfile
+    case expirationDateMissing
+
+    var errorDescription: String? {
+        switch self {
+        case .profileNotFound:
+            return "署名プロファイルが見つかりません。"
+        case .invalidProfile:
+            return "署名プロファイルを解析できません。"
+        case .expirationDateMissing:
+            return "署名プロファイルの期限を読み取れません。"
+        }
+    }
+}
+
+struct AppInstallationProfileReader {
+    func read(from bundle: Bundle) throws -> AppInstallationProfileStatus {
+        guard let url = bundle.url(forResource: "embedded", withExtension: "mobileprovision") else {
+            throw AppInstallationProfileError.profileNotFound
+        }
+        let data = try Data(contentsOf: url)
+        return try read(from: data)
+    }
+
+    func read(from data: Data) throws -> AppInstallationProfileStatus {
+        guard
+            let start = data.range(of: Data("<plist".utf8)),
+            let end = data.range(of: Data("</plist>".utf8))
+        else {
+            throw AppInstallationProfileError.invalidProfile
+        }
+
+        let plistData = data[start.lowerBound..<end.upperBound]
+        let object = try PropertyListSerialization.propertyList(from: plistData, format: nil)
+        guard let plist = object as? [String: Any] else {
+            throw AppInstallationProfileError.invalidProfile
+        }
+        guard let expirationDate = plist["ExpirationDate"] as? Date else {
+            throw AppInstallationProfileError.expirationDateMissing
+        }
+        return AppInstallationProfileStatus(expirationDate: expirationDate)
+    }
+}
+
 extension String {
     var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)

@@ -162,7 +162,9 @@ python3 scripts/refresh_ios_profile.py --threshold-days 2 --device-name "Your iP
 python3 scripts/refresh_ios_profile.py --threshold-days 2 --device-name "Your iPhone Name" --dry-run
 ```
 
-ビルドとインストールが完了してもprofile期限が延びなかった場合は、同じ期限に対して12時間は再試行しません。
+ビルド失敗やprofile期限未更新が起きても、同じ期限に対する再試行は最長1時間までに抑え、失効が近い場合はさらに短くして再試行します。
+
+`xcodebuild`が`No Accounts`で失敗した場合は、スクリプトが一度Xcodeを起動してから再試行します。既存のローカルprofileは、新しいビルドが古いprofileを使い回したと判断できた場合にだけ退避します。
 
 ログイン時、1時間ごと、8:30に自動実行するLaunchAgentを作成する場合は、次のコマンドを使います。
 
@@ -177,6 +179,8 @@ python3 scripts/install_profile_refresh_agent.py --device-name "Your iPhone Name
 ```
 
 端末名をコマンドに残したくない場合は、`WINE_REVIEW_DEVICE_NAME`または`WINE_REVIEW_DEVICE_ID`を環境変数で指定できます。
+
+実機に入ったアプリは、起動ページで埋め込み済みの`embedded.mobileprovision`から署名期限を表示します。残り24時間未満になると、期限表示と残り時間を赤字の警告表示に切り替えます。残り時間は24時間未満では`xx時間xx分`、24時間以上では`x日xx時間xx分`で表示します。
 
 ## テスト
 

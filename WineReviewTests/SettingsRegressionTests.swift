@@ -72,4 +72,24 @@ final class SettingsRegressionTests: XCTestCase {
 
         XCTAssertEqual(store.sessions[sessionId]?.finalGenerationText, editedPrompt)
     }
+
+    func testEmbeddedMobileProvisionExpirationIsParsed() throws {
+        let profile = """
+        garbage
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+        <key>ExpirationDate</key>
+        <date>2026-05-14T02:19:18Z</date>
+        </dict>
+        </plist>
+        trailer
+        """
+
+        let status = try AppInstallationProfileReader().read(from: Data(profile.utf8))
+
+        let formatter = ISO8601DateFormatter()
+        XCTAssertEqual(status.expirationDate, formatter.date(from: "2026-05-14T02:19:18Z"))
+    }
 }

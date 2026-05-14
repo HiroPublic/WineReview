@@ -61,6 +61,11 @@ struct LaunchView: View {
                 StatusRow(title: "\(store.config.aiProvider.label)設定", isReady: store.config.hasSelectedAIConfig)
             }
 
+            SigningStatusCard(
+                status: store.installationProfileStatus,
+                errorMessage: store.installationProfileErrorMessage
+            )
+
             if store.isLoading {
                 ProgressView("同期中")
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -90,6 +95,74 @@ struct LaunchView: View {
         .padding()
         .readableContent()
         .navigationTitle("起動")
+    }
+}
+
+struct SigningStatusCard: View {
+    let status: AppInstallationProfileStatus?
+    let errorMessage: String?
+
+    private static let expirationFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "yyyy/MM/dd HH:mm"
+        return formatter
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("証明書期限", systemImage: "checkmark.seal")
+                .font(.headline)
+
+            if let status {
+                let remaining = status.remainingInterval()
+                let warning = status.isExpiringWithin24Hours()
+                Text(Self.expirationFormatter.string(from: status.expirationDate))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(warning ? .red : .primary)
+                Text(warning ? warningText(for: remaining) : normalText(for: remaining))
+                    .font(.subheadline)
+                    .foregroundStyle(warning ? .red : .secondary)
+            } else {
+                Text(errorMessage ?? "証明書期限を取得できません。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func normalText(for remaining: TimeInterval) -> String {
+        "残り \(remainingText(for: remaining))"
+    }
+
+    private func warningText(for remaining: TimeInterval) -> String {
+        "警告: 証明書期限まで残り \(remainingText(for: remaining)) です。"
+    }
+
+    private func remainingText(for remaining: TimeInterval) -> String {
+        if remaining <= 0 {
+            let overdue = abs(remaining)
+            let hours = Int(overdue / 3600)
+            let minutes = Int((overdue.truncatingRemainder(dividingBy: 3600)) / 60)
+            return "\(hours)時間\(minutes)分で期限切れ"
+        }
+
+        let totalMinutes = Int(remaining / 60)
+        let days = totalMinutes / (24 * 60)
+        let dayHours = (totalMinutes % (24 * 60)) / 60
+        let dayMinutes = totalMinutes % 60
+
+        if days > 0 {
+            return "\(days)日\(dayHours)時間\(dayMinutes)分"
+        }
+
+        let totalHours = Int(remaining / 3600)
+        let minutes = Int((remaining.truncatingRemainder(dividingBy: 3600)) / 60)
+        return "\(totalHours)時間\(minutes)分"
     }
 }
 

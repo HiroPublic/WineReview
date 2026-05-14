@@ -49,6 +49,11 @@ def main() -> int:
     data = {
         "Label": args.label,
         "ProgramArguments": arguments,
+        "EnvironmentVariables": {
+            "HOME": str(Path.home()),
+            "LOGNAME": os.environ.get("LOGNAME", Path.home().name),
+            "USER": os.environ.get("USER", Path.home().name),
+        },
         "RunAtLoad": True,
         "StartInterval": int(args.interval_seconds),
         "StartCalendarInterval": {
@@ -57,6 +62,7 @@ def main() -> int:
         },
         "StandardOutPath": str(DEFAULT_LOG_DIR / "wine-review-profile-refresh.log"),
         "StandardErrorPath": str(DEFAULT_LOG_DIR / "wine-review-profile-refresh.err"),
+        "WorkingDirectory": str(ROOT),
     }
 
     if args.dry_run:

@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -22,17 +23,27 @@ PROFILE = APP / "embedded.mobileprovision"
 STATE_FILE = ROOT / "DerivedData" / "profile-refresh-state.json"
 SCHEME = "WineReview"
 DEFAULT_THRESHOLD_DAYS = 2.0
-DEFAULT_RETRY_COOLDOWN_HOURS = 12.0
+DEFAULT_RETRY_COOLDOWN_HOURS = 1.0
 DEFAULT_MIN_EXTENSION_HOURS = 1.0
+DEFAULT_XCODE_LAUNCH_WAIT_SECONDS = 20.0
 PROVISIONING_PROFILE_DIR = Path.home() / "Library" / "Developer" / "Xcode" / "UserData" / "Provisioning Profiles"
+NO_ACCOUNTS_MARKERS = (
+    "No Accounts",
+    "Add a new account in Accounts settings",
+)
+MISSING_PROFILE_MARKERS = (
+    "No profiles for",
+    "Provisioning profile",
+    "provisioning profiles matching",
+)
 
 
-def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], *, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
     print("+ " + " ".join(shlex.quote(part) for part in command))
     return subprocess.run(
         command,
         cwd=ROOT,
-        check=True,
+        check=check,
         text=True,
         capture_output=capture,
     )
@@ -69,6 +80,10 @@ def utc_datetime(value: datetime) -> datetime:
 
 def format_local(value: datetime) -> str:
     return value.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def remaining_hours_until(value: datetime) -> float:
+    return (value - datetime.now(timezone.utc)).total_seconds() / 3600
 
 
 def iso_datetime(value: datetime | None) -> str | None:
@@ -148,40 +163,101 @@ def find_device_id(device_id: str | None, device_name: str | None) -> str:
     raise ValueError(f"No available paired device matched --device-name {device_name!r}.")
 
 
-def retire_local_profile(profile_uuid: str | None) -> None:
+def retire_local_profile(profile_uuid: str | None) -> Path | None:
     if not profile_uuid:
-        return
+        return None
 
     profile_path = PROVISIONING_PROFILE_DIR / f"{profile_uuid}.mobileprovision"
     if not profile_path.exists():
-        return
+        return None
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     backup_path = profile_path.with_suffix(f".mobileprovision.retired-{timestamp}")
     print(f"Retiring local provisioning profile {profile_path} -> {backup_path}")
     profile_path.rename(backup_path)
+    return backup_path
 
 
-def build() -> None:
-    run(
-        [
-            "xcodebuild",
-            "-allowProvisioningUpdates",
-            "-project",
-            str(PROJECT),
-            "-scheme",
-            SCHEME,
-            "-destination",
-            "generic/platform=iOS",
-            "-derivedDataPath",
-            str(DERIVED_DATA),
-            "build",
-        ]
-    )
+def restore_local_profile(profile_uuid: str | None, backup_path: Path | None) -> None:
+    if not profile_uuid or not backup_path or not backup_path.exists():
+        return
+
+    profile_path = PROVISIONING_PROFILE_DIR / f"{profile_uuid}.mobileprovision"
+    if profile_path.exists():
+        print(f"Skipping restore because current profile already exists at {profile_path}")
+        return
+
+    print(f"Restoring local provisioning profile {backup_path} -> {profile_path}")
+    backup_path.rename(profile_path)
+
+
+def build_command() -> list[str]:
+    return [
+        "xcodebuild",
+        "-allowProvisioningUpdates",
+        "-project",
+        str(PROJECT),
+        "-scheme",
+        SCHEME,
+        "-destination",
+        "generic/platform=iOS",
+        "-derivedDataPath",
+        str(DERIVED_DATA),
+        "build",
+    ]
+
+
+def emit_result_output(result: subprocess.CompletedProcess[str]) -> None:
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
+
+
+def result_text(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(part for part in (result.stdout, result.stderr) if part)
+
+
+def has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
+
+
+def launch_xcode(wait_seconds: float) -> None:
+    print("Launching Xcode to restore the signing account session.")
+    run(["open", "-ga", "Xcode"], capture=True)
+    time.sleep(wait_seconds)
+
+
+def build_with_retry(*, xcode_launch_wait_seconds: float) -> subprocess.CompletedProcess[str]:
+    result = run(build_command(), capture=True, check=False)
+    emit_result_output(result)
+    if result.returncode == 0:
+        return result
+
+    text = result_text(result)
+    if not has_any_marker(text, NO_ACCOUNTS_MARKERS):
+        return result
+
+    print("xcodebuild could not access the configured Xcode account. Retrying after launching Xcode.")
+    launch_xcode(xcode_launch_wait_seconds)
+    retry_result = run(build_command(), capture=True, check=False)
+    emit_result_output(retry_result)
+    return retry_result
 
 
 def install(device_id: str) -> None:
     run(["xcrun", "devicectl", "device", "install", "app", "--device", device_id, str(APP)])
+
+
+def effective_cooldown_hours(expiration: datetime | None, cooldown_hours: float) -> float:
+    if expiration is None:
+        return cooldown_hours
+
+    remaining_hours = remaining_hours_until(expiration)
+    if remaining_hours <= 0:
+        return 0.25
+
+    return max(0.25, min(cooldown_hours, remaining_hours / 3))
 
 
 def should_wait_for_cooldown(expiration: datetime | None, cooldown_hours: float) -> tuple[bool, str | None]:
@@ -193,7 +269,8 @@ def should_wait_for_cooldown(expiration: datetime | None, cooldown_hours: float)
     if not last_attempt_at or last_attempt_expiration != current_expiration:
         return False, None
 
-    retry_at = last_attempt_at + timedelta(hours=cooldown_hours)
+    cooldown = effective_cooldown_hours(expiration, cooldown_hours)
+    retry_at = last_attempt_at + timedelta(hours=cooldown)
     now = datetime.now(timezone.utc)
     if now >= retry_at:
         return False, None
@@ -225,6 +302,7 @@ def main() -> int:
     parser.add_argument("--no-notify", action="store_true", help="Do not show macOS notifications.")
     parser.add_argument("--retry-cooldown-hours", type=float, default=DEFAULT_RETRY_COOLDOWN_HOURS)
     parser.add_argument("--min-extension-hours", type=float, default=DEFAULT_MIN_EXTENSION_HOURS)
+    parser.add_argument("--xcode-launch-wait-seconds", type=float, default=DEFAULT_XCODE_LAUNCH_WAIT_SECONDS)
     args = parser.parse_args()
     notify_enabled = not args.no_notify
 
@@ -261,11 +339,27 @@ def main() -> int:
         return 2
 
     print(f"Refreshing Wine Review on device {device_id}.")
+    original_profile_uuid = current_profile_uuid(PROFILE)
+    retired_backup_path: Path | None = None
     try:
-        retire_local_profile(current_profile_uuid(PROFILE))
-        build()
+        build_result = build_with_retry(xcode_launch_wait_seconds=args.xcode_launch_wait_seconds)
+        if build_result.returncode != 0:
+            failure_text = result_text(build_result)
+            if original_profile_uuid and has_any_marker(failure_text, MISSING_PROFILE_MARKERS + NO_ACCOUNTS_MARKERS):
+                retired_backup_path = retire_local_profile(original_profile_uuid)
+                if retired_backup_path is not None:
+                    print("Retrying build after retiring the cached provisioning profile.")
+                    build_result = build_with_retry(xcode_launch_wait_seconds=args.xcode_launch_wait_seconds)
+            if build_result.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    build_result.returncode,
+                    build_command(),
+                    output=build_result.stdout,
+                    stderr=build_result.stderr,
+                )
         install(device_id)
     except subprocess.CalledProcessError as error:
+        restore_local_profile(original_profile_uuid, retired_backup_path)
         command = shlex.join(error.cmd) if isinstance(error.cmd, list) else str(error.cmd)
         message = f"Command failed: {command}"
         print(message, file=sys.stderr)
@@ -278,11 +372,46 @@ def main() -> int:
         print(f"Post-refresh profile expires at {format_local(refreshed_expiration)} ({refreshed_remaining:.2f} days remaining).")
 
         min_extension = timedelta(hours=args.min_extension_hours)
+        if (
+            expiration is not None
+            and refreshed_expiration <= expiration + min_extension
+            and retired_backup_path is None
+            and original_profile_uuid == current_profile_uuid(PROFILE)
+        ):
+            print("Build completed with the previous profile still embedded. Retrying once after retiring the cached profile.")
+            retired_backup_path = retire_local_profile(original_profile_uuid)
+            if retired_backup_path is not None:
+                try:
+                    build_result = build_with_retry(xcode_launch_wait_seconds=args.xcode_launch_wait_seconds)
+                    if build_result.returncode != 0:
+                        raise subprocess.CalledProcessError(
+                            build_result.returncode,
+                            build_command(),
+                            output=build_result.stdout,
+                            stderr=build_result.stderr,
+                        )
+                    install(device_id)
+                except subprocess.CalledProcessError as error:
+                    restore_local_profile(original_profile_uuid, retired_backup_path)
+                    command = shlex.join(error.cmd) if isinstance(error.cmd, list) else str(error.cmd)
+                    message = f"Command failed: {command}"
+                    print(message, file=sys.stderr)
+                    notify("Wine Review profile refresh failed", message, enabled=notify_enabled)
+                    record_attempt(expiration, "command_failed")
+                    return error.returncode
+
+                refreshed_remaining, refreshed_expiration = remaining_days(PROFILE)
+                if refreshed_expiration is not None and refreshed_remaining is not None:
+                    print(
+                        f"Post-retire profile expires at {format_local(refreshed_expiration)} ({refreshed_remaining:.2f} days remaining)."
+                    )
+
         if expiration is not None and refreshed_expiration <= expiration + min_extension:
+            effective_cooldown = effective_cooldown_hours(expiration, args.retry_cooldown_hours)
             message = (
                 "Build and install completed, but the provisioning profile expiration did not extend. "
                 f"Current expiration is still {format_local(refreshed_expiration)}. "
-                f"Next retry is delayed for {args.retry_cooldown_hours:g} hours."
+                f"Next retry is delayed for {effective_cooldown:g} hours."
             )
             print(message)
             notify("Wine Review profile not extended", message, enabled=notify_enabled)
